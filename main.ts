@@ -16,11 +16,24 @@ import { join } from 'node:path';
 const source = new URL('./entry.png', import.meta.url);
 
 // The gate reads the file by its first bytes: refuse to ship anything that
-// is not a PNG, rather than silently copying a corrupt file.
-const header = readFileSync(source).subarray(0, 8);
+// is not a PNG, rather than silently copying a corrupt file. The PNG header
+// is 8 signature bytes, then the IHDR chunk: 4-byte length, 4-byte type
+// 'IHDR', then width and height as 4-byte big-endian integers.
+const header = readFileSync(source).subarray(0, 24);
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-if (!header.equals(PNG_MAGIC)) {
+if (header.length < 24 || !header.subarray(0, 8).equals(PNG_MAGIC)) {
   throw new Error('entry.png is not a PNG file');
+}
+if (header.subarray(12, 16).toString('ascii') !== 'IHDR') {
+  throw new Error('entry.png has no IHDR chunk');
+}
+
+// The gate caps the image at 1024 by 1024 pixels; refuse to ship a file
+// whose declared dimensions exceed that cap.
+const width = header.readUInt32BE(16);
+const height = header.readUInt32BE(20);
+if (width > 1024 || height > 1024) {
+  throw new Error(`entry.png is ${width}x${height}, over the 1024x1024 gate limit`);
 }
 
 // The gate caps the image at 1 MiB and 1024 by 1024 pixels; this entry is
